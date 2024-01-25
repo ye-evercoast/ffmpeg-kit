@@ -29,7 +29,7 @@
 
 ### 2. Building
 
-Run `ios.sh`/`macos.sh`/`tvos.sh` inside the project root to build `ffmpeg-kit` and `ffmpeg` shared libraries
+Run `ios.sh`/`macos.sh`/`tvos.sh`/`xros.sh` inside the project root to build `ffmpeg-kit` and `ffmpeg` shared libraries
 for a platform.
 
 Optionally, use `apple.sh` to combine bundles created by these three scripts in a single bundle.

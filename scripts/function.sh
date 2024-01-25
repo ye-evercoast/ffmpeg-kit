@@ -9,14 +9,14 @@ get_arch_name() {
   2) echo "armv7" ;; # ios
   3) echo "armv7s" ;; # ios
   4) echo "arm64-v8a" ;; # android
-  5) echo "arm64" ;; # ios, tvos, macos
+  5) echo "arm64" ;; # ios, tvos, macos, xros
   6) echo "arm64e" ;; # ios
   7) echo "i386" ;; # ios
   8) echo "x86" ;; # android
   9) echo "x86-64" ;; # android, ios, linux, macos, tvos
   10) echo "x86-64-mac-catalyst" ;; # ios
   11) echo "arm64-mac-catalyst" ;; # ios
-  12) echo "arm64-simulator" ;; # ios, tvos
+  12) echo "arm64-simulator" ;; # ios, tvos, xros
   esac
 }
 
@@ -35,14 +35,14 @@ from_arch_name() {
   armv7) echo 2 ;; # ios
   armv7s) echo 3 ;; # ios
   arm64-v8a) echo 4 ;; # android
-  arm64) echo 5 ;; # ios, tvos, macos
+  arm64) echo 5 ;; # ios, tvos, macos, xros
   arm64e) echo 6 ;; # ios
   i386) echo 7 ;; # ios
   x86) echo 8 ;; # android
   x86-64) echo 9 ;; # android, ios, linux, macos, tvos
   x86-64-mac-catalyst) echo 10 ;; # ios
   arm64-mac-catalyst) echo 11 ;; # ios
-  arm64-simulator) echo 12 ;; # ios
+  arm64-simulator) echo 12 ;; # ios, xros
   esac
 }
 
@@ -419,18 +419,18 @@ is_arch_supported_on_platform() {
     fi
     ;;
 
-    # IOS OR TVOS
+    # IOS, TVOS OR XROS
   $ARCH_ARM64_SIMULATOR)
-    if [[ ${FFMPEG_KIT_BUILD_TYPE} == "ios" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
+    if [[ ${FFMPEG_KIT_BUILD_TYPE} == "ios" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
       echo 1
     else
       echo 0
     fi
     ;;
 
-    # IOS, MACOS OR TVOS
+    # IOS, MACOS, TVOS OR XROS
   $ARCH_ARM64)
-    if [[ ${FFMPEG_KIT_BUILD_TYPE} == "ios" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "macos" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
+    if [[ ${FFMPEG_KIT_BUILD_TYPE} == "ios" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "macos" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]] || [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
       echo 1
     else
       echo 0
@@ -515,6 +515,8 @@ get_target() {
       echo "$(get_target_cpu)-apple-macos$(get_min_sdk_version)"
     elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
       echo "$(get_target_cpu)-apple-tvos$(get_min_sdk_version)"
+    elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
+      echo "$(get_target_cpu)-apple-xros$(get_min_sdk_version)"
     fi
     ;;
   arm64-simulator)
@@ -522,6 +524,8 @@ get_target() {
       echo "$(get_target_cpu)-apple-ios$(get_min_sdk_version)-simulator"
     elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
       echo "$(get_target_cpu)-apple-tvos$(get_min_sdk_version)-simulator"
+    elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
+      echo "$(get_target_cpu)-apple-xros$(get_min_sdk_version)-simulator"
     fi
     ;;
   x86-64)
@@ -556,6 +560,8 @@ get_host() {
       echo "$(get_target_cpu)-ios-darwin"
     elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
       echo "$(get_target_cpu)-tvos-darwin"
+    elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
+      echo "$(get_target_cpu)-xros-darwin"
     fi
     ;;
   arm64-v8a)
@@ -568,6 +574,8 @@ get_host() {
       echo "$(get_target_cpu)-apple-darwin"
     elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "tvos" ]]; then
       echo "$(get_target_cpu)-tvos-darwin"
+    elif [[ ${FFMPEG_KIT_BUILD_TYPE} == "xros" ]]; then
+      echo "$(get_target_cpu)-xros-darwin"
     fi
     ;;
   x86)
@@ -1830,6 +1838,9 @@ get_apple_cmake_system_name() {
     ;;
   tvos)
     echo "tvOS"
+    ;;
+  xros)
+    echo "visionOS"
     ;;
   *)
     case ${ARCH} in

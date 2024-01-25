@@ -143,6 +143,41 @@ disable_macos_architecture_not_supported_on_detected_sdk_version() {
   fi
 }
 
+disable_xros_architecture_not_supported_on_detected_sdk_version() {
+  local ARCH_NAME=$(get_arch_name $1)
+
+  case ${ARCH_NAME} in
+  armv7 | armv7s | i386)
+    local SUPPORTED=0
+    ;;
+  arm64e)
+    local SUPPORTED=0
+    ;;
+  x86-64-mac-catalyst)
+    local SUPPORTED=0
+    ;;
+  arm64-mac-catalyst)
+    local SUPPORTED=0
+    ;;
+  arm64-simulator)
+    local SUPPORTED=1
+    ;;
+  arm64)
+    local SUPPORTED=1
+    ;;
+  *)
+    local SUPPORTED=0
+    ;;
+  esac
+
+  if [[ ${SUPPORTED} -ne 1 ]]; then
+    if [[ -z ${BUILD_FORCE} ]]; then
+      echo -e "INFO: Disabled ${ARCH_NAME} architecture which is not supported on visionOS SDK\n" 1>>"${BASEDIR}"/build.log 2>&1
+      disable_arch "${ARCH_NAME}"
+    fi
+  fi
+}
+
 disable_tvos_videotoolbox_on_not_supported_sdk_version() {
 
   # INTRODUCED IN TVOS SDK 10.2
@@ -161,6 +196,8 @@ build_apple_architecture_variant_strings() {
   export APPLETVOS_ARCHITECTURES="$(get_apple_architectures_for_variant "${ARCH_VAR_APPLETVOS}")"
   export APPLETV_SIMULATOR_ARCHITECTURES="$(get_apple_architectures_for_variant "${ARCH_VAR_APPLETVSIMULATOR}")"
   export MACOSX_ARCHITECTURES="$(get_apple_architectures_for_variant "${ARCH_VAR_MACOS}")"
+  export XROS_ARCHITECTURES="$(get_apple_architectures_for_variant "${ARCH_VAR_XROS}")"
+  export XROS_SIMULATOR_ARCHITECTURES="$(get_apple_architectures_for_variant "${ARCH_VAR_XROSSIMULATOR}")"
 }
 
 #
@@ -212,6 +249,7 @@ create_ffmpeg_universal_library() {
   cp -r "${FFMPEG_DEFAULT_BUILD_PATH}"/include/* "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/include 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
   cp "${FFMPEG_DEFAULT_BUILD_PATH}"/include/config.h "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/include 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
 
+  # COPY LIBS
   for FFMPEG_LIB in "${FFMPEG_LIBS[@]}"; do
     local FFMPEG_LIB_UNIVERSAL_LIBRARY_PATH="${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}/lib/${FFMPEG_LIB}.dylib"
 
@@ -273,6 +311,97 @@ create_ffmpeg_universal_library() {
   echo -e "DEBUG: ${LIBRARY_NAME} universal library built for $(get_apple_architecture_variant "${ARCHITECTURE_VARIANT}") platform successfully\n" 1>>"${BASEDIR}"/build.log 2>&1
 }
 
+create_ffmpeg_universal_library_xros_only() {
+  local ARCHITECTURE_VARIANT="$1"
+  local ARCH_VAR_NAME=$(get_apple_architecture_variant_no_postfix "${ARCHITECTURE_VARIANT}")
+  local TARGET_ARCHITECTURES=("$(get_apple_architectures_for_variant "${ARCHITECTURE_VARIANT}")")
+  local LIBRARY_NAME="ffmpeg"
+  local UNIVERSAL_LIBRARY_DIRECTORY="${BASEDIR}/.tmp/$(get_universal_library_directory "${ARCHITECTURE_VARIANT}")"
+  local FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY="${UNIVERSAL_LIBRARY_DIRECTORY}/${LIBRARY_NAME}"
+  local LIPO="$(xcrun --sdk "$(get_default_sdk_name)" -f lipo)"
+
+  if [[ $(is_apple_architecture_variant_supported "${ARCHITECTURE_VARIANT}") -eq 0 ]]; then
+
+    # THERE ARE NO ARCHITECTURES ENABLED FOR THIS LIBRARY TYPE
+    echo -e "DEBUG: THERE ARE NO ARCHITECTURES ENABLED FOR THIS LIBRARY TYPE" 1>>"${BASEDIR}"/build.log 2>&1
+    return
+  fi
+
+  # INITIALIZE UNIVERSAL LIBRARY DIRECTORY
+  initialize_folder "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"
+  initialize_folder "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}/include"
+  initialize_folder "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}/lib"
+
+  local FFMPEG_DEFAULT_BUILD_PATH="${BASEDIR}/prebuilt/$(get_default_build_directory)/ffmpeg"
+
+  # COPY HEADER FILES
+  cp -r "${FFMPEG_DEFAULT_BUILD_PATH}"/include/* "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/include 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+  cp "${FFMPEG_DEFAULT_BUILD_PATH}"/include/config.h "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/include 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+
+  # COPY LIBS
+  for FFMPEG_LIB in "${FFMPEG_LIBS[@]}"; do
+    local FFMPEG_LIB_UNIVERSAL_LIBRARY_PATH="${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}/lib/${FFMPEG_LIB}.dylib"
+
+    LIPO_COMMAND="${LIPO} -create"
+
+    for ARCH in "${TARGET_ARCH_LIST[@]}"; do
+      if [[ " ${TARGET_ARCHITECTURES[*]} " == *" ${ARCH} "* ]]; then
+
+        local FULL_LIBRARY_PATH="${BASEDIR}/prebuilt/$(get_build_directory_xros_only "${ARCH_VAR_NAME}")/${LIBRARY_NAME}/lib/${FFMPEG_LIB}.$(get_ffmpeg_library_version ${FFMPEG_LIB}).dylib"
+        LIPO_COMMAND+=" ${FULL_LIBRARY_PATH}"
+      fi
+    done
+
+    LIPO_COMMAND+=" -output ${FFMPEG_LIB_UNIVERSAL_LIBRARY_PATH}"
+
+    ${LIPO_COMMAND} 1>>"${BASEDIR}"/build.log 2>&1
+
+    [[ $? -ne 0 ]] && exit_universal_library "${FFMPEG_LIB}"
+
+  done
+
+  # COPY UNIVERSAL LIBRARY LICENSES
+  if [[ ${GPL_ENABLED} == "yes" ]]; then
+    cp "${BASEDIR}"/tools/license/LICENSE.GPLv3 "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/LICENSE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+  else
+    cp "${BASEDIR}"/LICENSE "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/LICENSE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+  fi
+  for library in {0..49}; do
+    if [[ ${ENABLED_LIBRARIES[$library]} -eq 1 ]]; then
+        local ENABLED_LIBRARY_NAME="$(get_library_name ${library})"
+        local ENABLED_LIBRARY_NAME_UPPERCASE=$(echo "${ENABLED_LIBRARY_NAME}" | tr '[a-z]' '[A-Z]')
+
+        RC=$(copy_external_library_license "${library}" "${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}"/LICENSE.${ENABLED_LIBRARY_NAME_UPPERCASE})
+
+        [[ ${RC} -ne 0 ]] && exit_universal_library "${LIBRARY_NAME}"
+    fi
+  done
+
+  # COPY CUSTOM LIBRARY LICENSES
+  for custom_library_index in "${CUSTOM_LIBRARIES[@]}"; do
+    library_name="CUSTOM_LIBRARY_${custom_library_index}_NAME"
+    library_name_uppercase=$(echo "${!library_name}" | tr '[a-z]' '[A-Z]')
+    relative_license_path="CUSTOM_LIBRARY_${custom_library_index}_LICENSE_FILE"
+
+    destination_license_path="${FFMPEG_UNIVERSAL_LIBRARY_DIRECTORY}/LICENSE.${library_name_uppercase}"
+
+    cp "${BASEDIR}/src/${!library_name}/${!relative_license_path}" "${destination_license_path}" 1>>"${BASEDIR}"/build.log 2>&1
+
+    RC=$?
+
+    if [[ ${RC} -ne 0 ]]; then
+      echo -e "DEBUG: Failed to copy the license file of custom library ${!library_name}\n" 1>>"${BASEDIR}"/build.log 2>&1
+      echo -e "failed\n\nSee build.log for details\n"
+      exit 1
+    fi
+
+    echo -e "DEBUG: Copied the license file of custom library ${!library_name} successfully\n" 1>>"${BASEDIR}"/build.log 2>&1
+  done
+
+  echo -e "DEBUG: ${LIBRARY_NAME} universal library built for $(get_apple_architecture_variant_no_postfix "${ARCHITECTURE_VARIANT}") platform successfully\n" 1>>"${BASEDIR}"/build.log 2>&1
+}
+
+
 #
 # 1. architecture variant
 #
@@ -329,6 +458,60 @@ create_ffmpeg_kit_universal_library() {
   cp "${BASEDIR}"/tools/source/SOURCE "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"/SOURCE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
 
   echo -e "DEBUG: ${LIBRARY_NAME} universal library built for $(get_apple_architecture_variant "${ARCHITECTURE_VARIANT}") platform successfully\n" 1>>"${BASEDIR}"/build.log 2>&1
+}
+
+create_ffmpeg_kit_universal_library_xros_only() {
+  local ARCHITECTURE_VARIANT="$1"
+  local ARCH_VAR_NAME=$(get_apple_architecture_variant_no_postfix "${ARCHITECTURE_VARIANT}")
+  local TARGET_ARCHITECTURES=("$(get_apple_architectures_for_variant "${ARCHITECTURE_VARIANT}")")
+  local LIBRARY_NAME="ffmpeg-kit"
+  local UNIVERSAL_LIBRARY_DIRECTORY="${BASEDIR}/.tmp/$(get_universal_library_directory "${ARCHITECTURE_VARIANT}")"
+  local FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY="${UNIVERSAL_LIBRARY_DIRECTORY}/${LIBRARY_NAME}"
+  local LIPO="$(xcrun --sdk "$(get_default_sdk_name)" -f lipo)"
+
+  if [[ $(is_apple_architecture_variant_supported "${ARCHITECTURE_VARIANT}") -eq 0 ]]; then
+
+    # THERE ARE NO ARCHITECTURES ENABLED FOR THIS LIBRARY TYPE
+    return
+  fi
+
+  # INITIALIZE UNIVERSAL LIBRARY DIRECTORY
+  initialize_folder "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"
+  initialize_folder "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}/include"
+  initialize_folder "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}/lib"
+
+  local FFMPEG_KIT_DEFAULT_BUILD_PATH="${BASEDIR}/prebuilt/$(get_default_build_directory)/ffmpeg-kit"
+
+  # COPY HEADER FILES
+  cp -r "${FFMPEG_KIT_DEFAULT_BUILD_PATH}"/include/* "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"/include 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+
+  local FFMPEG_KIT_UNIVERSAL_LIBRARY_PATH="${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}/lib/libffmpegkit.dylib"
+
+  LIPO_COMMAND="${LIPO} -create"
+
+  for ARCH in "${TARGET_ARCH_LIST[@]}"; do
+    if [[ " ${TARGET_ARCHITECTURES[*]} " == *" ${ARCH} "* ]]; then
+      local FULL_LIBRARY_PATH="${BASEDIR}/prebuilt/$(get_build_directory_xros_only "${ARCH_VAR_NAME}")/${LIBRARY_NAME}/lib/libffmpegkit.dylib"
+      LIPO_COMMAND+=" ${FULL_LIBRARY_PATH}"
+    fi
+  done
+
+  LIPO_COMMAND+=" -output ${FFMPEG_KIT_UNIVERSAL_LIBRARY_PATH}"
+
+  ${LIPO_COMMAND} 1>>"${BASEDIR}"/build.log 2>&1
+
+  [[ $? -ne 0 ]] && exit_universal_library "${LIBRARY_NAME}"
+
+  # COPY UNIVERSAL LIBRARY LICENSES
+  if [[ ${GPL_ENABLED} == "yes" ]]; then
+    cp "${BASEDIR}"/tools/license/LICENSE.GPLv3 "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"/LICENSE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+  else
+    cp "${BASEDIR}"/LICENSE "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"/LICENSE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+  fi
+
+  cp "${BASEDIR}"/tools/source/SOURCE "${FFMPEG_KIT_UNIVERSAL_LIBRARY_DIRECTORY}"/SOURCE 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
+
+  echo -e "DEBUG: ${LIBRARY_NAME} universal library built for $(get_apple_architecture_variant_no_postfix "${ARCHITECTURE_VARIANT}") platform successfully\n" 1>>"${BASEDIR}"/build.log 2>&1
 }
 
 #
@@ -621,6 +804,23 @@ get_build_directory() {
   esac
 }
 
+get_build_directory_xros_only() {
+  local LTS_POSTFIX=""
+  if [[ -n ${FFMPEG_KIT_LTS_BUILD} ]]; then
+    LTS_POSTFIX="-lts"
+  fi
+
+  local ARCH_VAR="$1"
+  case ${ARCH_VAR} in
+  xros)
+    echo "apple-${ARCH_VAR}-${ARCH}${LTS_POSTFIX}"
+    ;;
+  xrsimulator)
+    echo "apple-xros-${ARCH}-simulator${LTS_POSTFIX}"
+    ;;
+  esac
+}
+
 #
 # 1. framework type
 #
@@ -655,6 +855,12 @@ get_framework_directory() {
     ;;
   "${ARCH_VAR_MACOS}")
     echo "bundle-apple-framework-macos${LTS_POSTFIX}"
+    ;;
+  "${ARCH_VAR_XROS}")
+    echo "bundle-apple-framework-xros${LTS_POSTFIX}"
+    ;;
+  "${ARCH_VAR_XROSSIMULATOR}")
+    echo "bundle-apple-framework-xrsimulator${LTS_POSTFIX}"
     ;;
   esac
 }
@@ -712,6 +918,12 @@ get_universal_library_directory() {
   "${ARCH_VAR_MACOS}")
     echo "bundle-apple-universal-macos${LTS_POSTFIX}"
     ;;
+  "${ARCH_VAR_XROS}")
+    echo "bundle-apple-universal-xros${LTS_POSTFIX}"
+    ;;
+  "${ARCH_VAR_XROSSIMULATOR}")
+    echo "bundle-apple-universal-xrsimulator${LTS_POSTFIX}"
+    ;;
   esac
 }
 
@@ -749,6 +961,49 @@ get_apple_architecture_variant() {
     ;;
   "${ARCH_VAR_MACOS}")
     echo "macos${LTS_POSTFIX}"
+    ;;
+  "${ARCH_VAR_XROS}")
+    echo "xros${LTS_POSTFIX}"
+    ;;
+  "${ARCH_VAR_XROSSIMULATOR}")
+    echo "xrsimulator${LTS_POSTFIX}"
+    ;;
+  esac
+}
+
+get_apple_architecture_variant_no_postfix() {
+  local ARCHITECTURE_VARIANT="$1"
+  
+  case ${ARCHITECTURE_VARIANT} in
+  "${ARCH_VAR_IOS}")
+    echo "ios"
+    ;;
+  "${ARCH_VAR_IPHONEOS}")
+    echo "iphoneos"
+    ;;
+  "${ARCH_VAR_IPHONESIMULATOR}")
+    echo "iphonesimulator"
+    ;;
+  "${ARCH_VAR_MAC_CATALYST}")
+    echo "mac-catalyst"
+    ;;
+  "${ARCH_VAR_TVOS}")
+    echo "tvos"
+    ;;
+  "${ARCH_VAR_APPLETVOS}")
+    echo "appletvos"
+    ;;
+  "${ARCH_VAR_APPLETVSIMULATOR}")
+    echo "appletvsimulator"
+    ;;
+  "${ARCH_VAR_MACOS}")
+    echo "macos"
+    ;;
+  "${ARCH_VAR_XROS}")
+    echo "xros"
+    ;;
+  "${ARCH_VAR_XROSSIMULATOR}")
+    echo "xrsimulator"
     ;;
   esac
 }
@@ -799,6 +1054,16 @@ get_apple_architectures_for_variant() {
     ;;
   "${ARCH_VAR_MACOS}")
     for index in ${ARCH_ARM64} ${ARCH_X86_64}; do
+      ARCHITECTURES+=" $(get_full_arch_name "${index}") "
+    done
+    ;;
+  "${ARCH_VAR_XROS}")
+    for index in ${ARCH_ARM64}; do
+      ARCHITECTURES+=" $(get_full_arch_name "${index}") "
+    done
+    ;;
+  "${ARCH_VAR_XROSSIMULATOR}")
+    for index in ${ARCH_ARM64}; do
       ARCHITECTURES+=" $(get_full_arch_name "${index}") "
     done
     ;;
@@ -931,6 +1196,11 @@ build_info_plist() {
     local MINIMUM_OS_VERSION="${MACOS_MIN_VERSION}"
     local SUPPORTED_PLATFORMS="MacOSX"
     ;;
+  xros)
+    local MINIMUM_VERSION_KEY="MinimumOSVersion"
+    local SUPPORTED_PLATFORMS="visionOS"
+    local MINIMUM_OS_VERSION="1.0"
+    ;;
   esac
 
   cat >${FILE_PATH} <<EOF
@@ -980,6 +1250,9 @@ get_default_sdk_name() {
   macos)
     echo "macosx"
     ;;
+  xros)
+    echo "xros"
+    ;;
   esac
 }
 
@@ -998,6 +1271,9 @@ get_sdk_name() {
       ;;
     macos)
       echo "macosx"
+      ;;
+    xros)
+      echo "xros"
       ;;
     esac
     ;;
@@ -1024,6 +1300,9 @@ get_sdk_name() {
       ;;
     tvos)
       echo "appletvsimulator"
+      ;;
+    xros)
+      echo "xrsimulator"
       ;;
     esac
     ;;
