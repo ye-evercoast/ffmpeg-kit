@@ -575,6 +575,16 @@ create_ffmpeg_framework() {
       # COPY LIBRARY FILE
       cp "${FFMPEG_UNIVERSAL_LIBRARY_PATH}/lib/${FFMPEG_LIB}.dylib" "${FFMPEG_LIB_FRAMEWORK_PATH}/${FFMPEG_LIB}" 1>>"${BASEDIR}"/build.log 2>&1 || exit 1
 
+      # COPY PRIVACY MANIFEST
+
+      if [[ "${FFMPEG_LIB}" == "libavutil" ]]; then
+        copy_privacy_manifest ${BASEDIR}/PrivacyInfo_libavutil.xcprivacy "${FFMPEG_LIB_FRAMEWORK_PATH}"
+      elif [[ "${FFMPEG_LIB}" == "libavformat" ]]; then
+        copy_privacy_manifest ${BASEDIR}/PrivacyInfo_libavformat.xcprivacy "${FFMPEG_LIB_FRAMEWORK_PATH}"
+      else
+        copy_privacy_manifest ${BASEDIR}/PrivacyInfo_empty.xcprivacy "${FFMPEG_LIB_FRAMEWORK_PATH}"
+      fi
+
     fi
 
     # COPY FRAMEWORK LICENSES
@@ -1237,6 +1247,31 @@ build_info_plist() {
 </dict>
 </plist>
 EOF
+}
+
+copy_privacy_manifest() {
+  local PRIVACY_MANIFEST_FILE="$1"
+  local DESTINATION="$2"
+
+  if [ ! -f "$PRIVACY_MANIFEST_FILE" ]; then
+    echo "Error: Privacy Manifest '$PRIVACY_MANIFEST_FILE' not found."
+    return 1
+  fi
+
+  if [ ! -d "$DESTINATION" ]; then
+    echo "Error: Destination directory '$DESTINATION' does not exist."
+    return 1
+  fi
+
+  cp "$PRIVACY_MANIFEST_FILE" "${DESTINATION}/PrivacyInfo.xcprivacy"
+
+  if [ $? -eq 0 ]; then
+    echo "Copied privacy manifest from $PRIVACY_MANIFEST_FILE to ${DESTINATION}/PrivacyInfo.xcprivacy"
+  else
+    echo "Failed to copy from $PRIVACY_MANIFEST_FILE to ${DESTINATION}/PrivacyInfo.xcprivacy"
+    reutrn 1
+  fi
+
 }
 
 get_default_sdk_name() {
